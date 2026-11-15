@@ -54,7 +54,11 @@ export function headlines(cf: CaseFile, limit = 3): Headline[] {
         ? rising
           ? "Wetter years"
           : "Less rain"
-        : `${info.label} ${rising ? "rising" : "falling"}`;
+        : r.key === "T2M_MAX"
+          ? `Hottest days ${rising ? "getting hotter" : "getting cooler"}`
+          : r.key === "T2M_MIN"
+            ? `Coldest nights ${rising ? "getting warmer" : "getting colder"}`
+            : `${info.label} ${rising ? "rising" : "falling"}`;
     return {
       key: r.key,
       text: `${verb}: ${signed(t.slopePerDecade, changeDecimals(r.key))} ${changeUnit(r.key)} per decade`,

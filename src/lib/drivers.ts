@@ -30,7 +30,7 @@ const RULES: Rule[] = [
     when: [["ALLSKY_SFC_SW_DWN", "up"], ["T2M_MAX", "up"]],
     title: "More sunshine is reaching the ground",
     explanation:
-      "Sunlight at the surface rose alongside daytime highs. Fewer clouds or cleaner, less hazy air let more solar energy heat the ground.",
+      "Sunlight at the surface rose alongside the hottest days of each month. Fewer clouds or cleaner, less hazy air let more solar energy heat the ground.",
     check: ["ALLSKY_SFC_SW_DWN", "T2M_MAX", 1],
   },
   {
