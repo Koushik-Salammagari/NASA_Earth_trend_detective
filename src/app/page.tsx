@@ -18,6 +18,7 @@ import { VARIABLES, VARIABLE_MAP, type VariableKey } from "@/lib/variables";
 import { changeDecimals, changeUnit, fmt, pText, significanceLabel, signed } from "@/lib/format";
 import { explainPayload, headlines } from "@/lib/findings";
 import { FAMILY_COLOR, SeasonChart, Sparkline, TrendChart } from "@/components/charts";
+import Detective, { VerifiedBadge } from "@/components/Detective";
 
 interface Place {
   name: string;
@@ -41,7 +42,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<VariableKey>("T2M_MAX");
-  const [ai, setAi] = useState<{ status: "idle" | "loading" | "done" | "off"; text?: string; note?: string }>({
+  const [ai, setAi] = useState<{
+    status: "idle" | "loading" | "done" | "off";
+    text?: string;
+    note?: string;
+    check?: { checked: number; verified: number; removed: { sentence: string; badNumbers: string[] }[] };
+  }>({
     status: "idle",
   });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,12 +82,12 @@ export default function Home() {
     fetch("/api/explain", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(explainPayload(data)),
+      body: JSON.stringify({ ...explainPayload(data), yearRange: [data.period.start, data.period.end] }),
     })
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
-        if (j.text) setAi({ status: "done", text: j.text });
+        if (j.text) setAi({ status: "done", text: j.text, check: j.check });
         else setAi({ status: "off", note: j.reason || "AI explanation is unavailable right now." });
       })
       .catch(() => !cancelled && setAi({ status: "off", note: "AI explanation is unavailable right now." }));
@@ -261,6 +267,15 @@ export default function Home() {
               )}
             </section>
 
+            <Detective
+              key={data.place.name}
+              place={data.place}
+              onFocusVariable={(k) => {
+                setSelected(k);
+                document.getElementById("detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            />
+
             {/* What changed */}
             <section>
               <div className="mb-4 flex items-end justify-between">
@@ -284,7 +299,7 @@ export default function Home() {
 
             {/* Detail */}
             {selectedResult && (
-              <section className="rise grid gap-4 lg:grid-cols-3" key={selected}>
+              <section id="detail" className="rise grid scroll-mt-6 gap-4 lg:grid-cols-3" key={selected}>
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 lg:col-span-2">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h3 className="text-lg font-semibold tracking-tight">{VARIABLE_MAP[selected].label}, every year</h3>
@@ -383,6 +398,11 @@ export default function Home() {
                     ))}
                   {ai.status === "off" && <p className="text-slate-500">{ai.note}</p>}
                 </div>
+                {ai.status === "done" && (
+                  <div className="mt-4">
+                    <VerifiedBadge check={ai.check} />
+                  </div>
+                )}
               </div>
             </section>
 
