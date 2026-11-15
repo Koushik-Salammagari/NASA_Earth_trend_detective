@@ -15,36 +15,28 @@ interface ExplainBody {
 
 let cachedModel: string | null = null;
 
-// Picks a text model this key can use, preferring stable "flash" models with the highest version.
-async function discoverModel(key: string): Promise<string | null> {
+// Lists text models this key can use, best first: fast "lite" and "flash" models (they respond
+// quickly and have the most generous free limits), stable before preview, newer before older.
+async function candidateModels(key: string): Promise<string[]> {
   const res = await fetch(`${API}/models?pageSize=200`, {
     headers: { "x-goog-api-key": key },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(8000),
   });
-  if (!res.ok) return null;
+  if (!res.ok) return [];
   const json = await res.json();
   const models: { name: string; supportedGenerationMethods?: string[] }[] = json.models ?? [];
   const usable = models
     .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
     .map((m) => m.name.replace(/^models\//, ""))
-    .filter((n) => n.startsWith("gemini") && !/(image|tts|audio|live|embedding|vision|robotics|computer)/.test(n));
+    .filter((n) => n.startsWith("gemini") && !/(image|tts|audio|live|embedding|vision|robotics|computer|pro)/.test(n));
 
   const version = (n: string) => Number(n.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? 0);
   const score = (n: string) =>
-    (n.includes("flash") ? 100 : 0) +
-    (n.includes("lite") ? -20 : 0) +
-    (/(preview|exp)/.test(n) ? -40 : 0) +
+    (n.includes("flash-lite") ? 200 : n.includes("flash") ? 150 : 0) +
+    (/(preview|exp)/.test(n) ? -100 : 0) +
+    (/-latest$/.test(n) ? -5 : 0) +
     version(n);
-  usable.sort((a, b) => score(b) - score(a));
-  return usable[0] ?? null;
-}
-
-// Short summaries don't need extended reasoning; keep "thinking" minimal so answers come back fast.
-function thinkingConfig(model: string) {
-  const v = Number(model.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? 0);
-  if (v >= 3) return { thinkingLevel: "low" };
-  if (v >= 2.5) return { thinkingBudget: model.includes("pro") ? 128 : 0 };
-  return undefined;
+  return usable.sort((a, b) => score(b) - score(a));
 }
 
 async function generate(key: string, model: string, prompt: string) {
@@ -57,7 +49,7 @@ async function generate(key: string, model: string, prompt: string) {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.3, maxOutputTokens: 2048, ...(tc ? { thinkingConfig: tc } : {}) },
       }),
-      signal: AbortSignal.timeout(40000),
+      signal: AbortSignal.timeout(15000),
     });
   };
   const res = await call(true);
@@ -94,33 +86,45 @@ Write exactly three short paragraphs in plain text, no markdown, no bullet point
 3. Why it matters for people living there, and one honest limitation (for example, about 50 km resolution or that some trends aren't statistically significant).
 Do not invent numbers, events, or places that aren't in the facts. Keep it under 170 words.`;
 
-  let model: string | null = null;
+  const tried: string[] = [];
   try {
-    model = process.env.GEMINI_MODEL || cachedModel || (await discoverModel(key));
-    if (!model) return NextResponse.json({ text: null, reason: "No usable AI model found for this key." }, { status: 502 });
+    const preferred = process.env.GEMINI_MODEL || cachedModel;
+    const list = preferred ? [preferred] : [];
+    if (!process.env.GEMINI_MODEL) {
+      for (const m of await candidateModels(key)) if (!list.includes(m)) list.push(m);
+    }
+    if (!list.length) return NextResponse.json({ text: null, reason: "No usable AI model found for this key." }, { status: 502 });
 
-    let res = await generate(key, model, prompt);
-    if (res.status === 404) {
-      // The chosen model isn't available to this key: find one that is and try once more.
-      const found = await discoverModel(key);
-      if (found && found !== model) {
-        model = found;
-        res = await generate(key, model, prompt);
+    // Try up to three models, moving on if one is unavailable, rate-limited or too slow.
+    for (const model of list.slice(0, 3)) {
+      tried.push(model);
+      try {
+        const res = await generate(key, model, prompt);
+        if (!res.ok) {
+          tried[tried.length - 1] += ` (${res.status})`;
+          continue;
+        }
+        const json = await res.json();
+        const text: string =
+          json?.candidates?.[0]?.content?.parts
+            ?.filter((p: { thought?: boolean }) => !p.thought)
+            .map((p: { text?: string }) => p.text ?? "")
+            .join("")
+            .trim() ?? "";
+        if (!text) {
+          tried[tried.length - 1] += " (empty)";
+          continue;
+        }
+        cachedModel = model;
+        return NextResponse.json({ text, model });
+      } catch {
+        tried[tried.length - 1] += " (timeout)";
+        continue;
       }
     }
-    if (!res.ok) {
-      return NextResponse.json({ text: null, model, reason: `AI service returned ${res.status}.` }, { status: 502 });
-    }
-    cachedModel = model;
-    const json = await res.json();
-    const text: string =
-      json?.candidates?.[0]?.content?.parts
-        ?.filter((p: { thought?: boolean }) => !p.thought)
-        .map((p: { text?: string }) => p.text ?? "")
-        .join("")
-        .trim() ?? "";
-    return NextResponse.json({ text: text || null, model, reason: text ? undefined : "The AI returned an empty answer." });
+    cachedModel = null;
+    return NextResponse.json({ text: null, tried, reason: "AI service didn't respond." }, { status: 502 });
   } catch {
-    return NextResponse.json({ text: null, model, reason: "AI service didn't respond." }, { status: 502 });
+    return NextResponse.json({ text: null, tried, reason: "AI service didn't respond." }, { status: 502 });
   }
 }
