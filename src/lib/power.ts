@@ -53,6 +53,9 @@ export async function fetchPowerMonthly(lat: number, lon: number): Promise<{ raw
   }
 }
 
+// The AG community reports sunlight in MJ/m²/day; the app shows kWh/m²/day (1 kWh = 3.6 MJ).
+const MJ_PER_KWH = 3.6;
+
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
 
@@ -82,6 +85,7 @@ export function toAnnual(key: VariableKey, monthly: Record<string, number>): Yea
     } else {
       value = months.reduce((sum, m) => sum + m.value, 0) / months.length;
       if (key === "GWETROOT") value *= 100;
+      if (key === "ALLSKY_SFC_SW_DWN") value /= MJ_PER_KWH;
     }
     out.push({ year, value });
   }
@@ -105,6 +109,7 @@ export function monthlyClimatology(
     let v = value;
     if (key === "PRECTOTCORR") v = value * DAYS_IN_MONTH[month - 1];
     if (key === "GWETROOT") v = value * 100;
+    if (key === "ALLSKY_SFC_SW_DWN") v = value / MJ_PER_KWH;
     sums[month - 1] += v;
     counts[month - 1] += 1;
   }
