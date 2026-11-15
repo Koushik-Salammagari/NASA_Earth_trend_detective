@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Asks Google Gemini to explain the already-computed results in plain English.
 // The statistics are computed by the app; the AI only explains them.
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const API = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -39,16 +39,30 @@ async function discoverModel(key: string): Promise<string | null> {
   return usable[0] ?? null;
 }
 
+// Short summaries don't need extended reasoning; keep "thinking" minimal so answers come back fast.
+function thinkingConfig(model: string) {
+  const v = Number(model.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? 0);
+  if (v >= 3) return { thinkingLevel: "low" };
+  if (v >= 2.5) return { thinkingBudget: model.includes("pro") ? 128 : 0 };
+  return undefined;
+}
+
 async function generate(key: string, model: string, prompt: string) {
-  return fetch(`${API}/models/${model}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
-    }),
-    signal: AbortSignal.timeout(25000),
-  });
+  const call = (withThinking: boolean) => {
+    const tc = withThinking ? thinkingConfig(model) : undefined;
+    return fetch(`${API}/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 2048, ...(tc ? { thinkingConfig: tc } : {}) },
+      }),
+      signal: AbortSignal.timeout(40000),
+    });
+  };
+  const res = await call(true);
+  // Some models reject thinking settings; retry once without them.
+  return res.status === 400 ? call(false) : res;
 }
 
 export async function POST(req: NextRequest) {
@@ -80,8 +94,9 @@ Write exactly three short paragraphs in plain text, no markdown, no bullet point
 3. Why it matters for people living there, and one honest limitation (for example, about 50 km resolution or that some trends aren't statistically significant).
 Do not invent numbers, events, or places that aren't in the facts. Keep it under 170 words.`;
 
+  let model: string | null = null;
   try {
-    let model = process.env.GEMINI_MODEL || cachedModel || (await discoverModel(key));
+    model = process.env.GEMINI_MODEL || cachedModel || (await discoverModel(key));
     if (!model) return NextResponse.json({ text: null, reason: "No usable AI model found for this key." }, { status: 502 });
 
     let res = await generate(key, model, prompt);
@@ -94,7 +109,7 @@ Do not invent numbers, events, or places that aren't in the facts. Keep it under
       }
     }
     if (!res.ok) {
-      return NextResponse.json({ text: null, reason: `AI service returned ${res.status}.` }, { status: 502 });
+      return NextResponse.json({ text: null, model, reason: `AI service returned ${res.status}.` }, { status: 502 });
     }
     cachedModel = model;
     const json = await res.json();
@@ -106,6 +121,6 @@ Do not invent numbers, events, or places that aren't in the facts. Keep it under
         .trim() ?? "";
     return NextResponse.json({ text: text || null, model, reason: text ? undefined : "The AI returned an empty answer." });
   } catch {
-    return NextResponse.json({ text: null, reason: "AI service didn't respond." }, { status: 502 });
+    return NextResponse.json({ text: null, model, reason: "AI service didn't respond." }, { status: 502 });
   }
 }
