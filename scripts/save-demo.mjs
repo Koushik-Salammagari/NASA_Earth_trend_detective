@@ -3,7 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 
 const PLACES = [
-  { name: "Fremont", lat: 37.5485, lon: -121.9886 },
+  { name: "Mountain View", lat: 37.3861, lon: -122.0839 },
   { name: "Phoenix", lat: 33.4484, lon: -112.074 },
   { name: "Chennai", lat: 13.0827, lon: 80.2707 },
   { name: "London", lat: 51.5072, lon: -0.1276 },

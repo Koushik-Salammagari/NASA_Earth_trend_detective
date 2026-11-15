@@ -26,7 +26,7 @@ interface Place {
 }
 
 const QUICK_PICKS: Place[] = [
-  { name: "Fremont, California, United States", lat: 37.5485, lon: -121.9886 },
+  { name: "Mountain View, California, United States", lat: 37.3861, lon: -122.0839 },
   { name: "Phoenix, Arizona, United States", lat: 33.4484, lon: -112.074 },
   { name: "Chennai, Tamil Nadu, India", lat: 13.0827, lon: 80.2707 },
   { name: "London, England, United Kingdom", lat: 51.5072, lon: -0.1276 },
