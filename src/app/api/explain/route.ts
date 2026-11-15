@@ -39,6 +39,14 @@ async function candidateModels(key: string): Promise<string[]> {
   return usable.sort((a, b) => score(b) - score(a));
 }
 
+// Short summaries don't need extended reasoning; keep "thinking" minimal so answers come back fast.
+function thinkingConfig(model: string) {
+  const v = Number(model.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? 0);
+  if (v >= 3) return { thinkingLevel: "low" };
+  if (v >= 2.5) return { thinkingBudget: 0 };
+  return undefined;
+}
+
 async function generate(key: string, model: string, prompt: string) {
   const call = (withThinking: boolean) => {
     const tc = withThinking ? thinkingConfig(model) : undefined;
