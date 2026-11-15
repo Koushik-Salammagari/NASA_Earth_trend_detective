@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "save-demo": "node scripts/save-demo.mjs"
+    "save-demo": "node scripts/save-demo.mjs",
+    "prebuild": "node scripts/save-demo.mjs"
   },
   "dependencies": {
     "geist": "^1.9.2",

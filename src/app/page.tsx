@@ -58,7 +58,10 @@ export default function Home() {
     setError(null);
     setAi({ status: "idle" });
     try {
-      const res = await fetch(`/api/analyze?lat=${p.lat}&lon=${p.lon}&name=${encodeURIComponent(p.name)}`);
+      const savedMode = new URLSearchParams(window.location.search).get("saved") === "1";
+      const res = await fetch(
+        `/api/analyze?lat=${p.lat}&lon=${p.lon}&name=${encodeURIComponent(p.name)}${savedMode ? "&source=saved" : ""}`,
+      );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Something went wrong.");
       setData(json as CaseFile);
@@ -238,7 +241,7 @@ export default function Home() {
                 </div>
                 {data.source === "saved" && (
                   <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-800 ring-1 ring-amber-200">
-                    Showing saved NASA data (live service unavailable)
+                    Showing saved NASA data{data.savedAt ? ` from ${data.savedAt.slice(0, 10)}` : ""}
                   </span>
                 )}
               </div>

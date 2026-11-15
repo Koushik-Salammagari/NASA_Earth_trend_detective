@@ -41,3 +41,6 @@ yarn-error.log*
 next-env.d.ts
 
 !.env.example
+
+# demo backups are downloaded fresh at build time
+data/saved/*.json

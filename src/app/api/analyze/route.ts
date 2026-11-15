@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { raw, endYear, source } = await getPowerData(lat, lon);
-    return NextResponse.json(analyze(raw, { name, lat, lon }, endYear, source));
+    const { raw, endYear, source, savedAt } = await getPowerData(lat, lon, sp.get("source") === "saved");
+    return NextResponse.json(analyze(raw, { name, lat, lon }, endYear, source, savedAt));
   } catch {
     return NextResponse.json(
       { error: "NASA's data service didn't respond. Try again in a moment." },

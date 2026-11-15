@@ -4,7 +4,7 @@ import { investigate } from "@/lib/investigate";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  let body: { question?: string; lat?: number; lon?: number; name?: string };
+  let body: { question?: string; lat?: number; lon?: number; name?: string; saved?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await investigate({ question, lat, lon, name: String(body.name ?? "Selected place").slice(0, 120) });
+    const result = await investigate({ question, lat, lon, name: String(body.name ?? "Selected place").slice(0, 120), preferSaved: body.saved === true });
     return NextResponse.json(result);
   } catch {
     return NextResponse.json({ error: "The investigation couldn't finish. NASA's service may be busy; try again." }, { status: 502 });

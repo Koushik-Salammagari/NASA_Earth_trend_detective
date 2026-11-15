@@ -21,6 +21,7 @@ export interface CaseFile {
   variables: Partial<Record<VariableKey, VariableResult>>;
   drivers: DriverClue[];
   source: "live" | "saved";
+  savedAt?: string;
   generatedAt: string;
 }
 
@@ -29,6 +30,7 @@ export function analyze(
   place: { name: string; lat: number; lon: number },
   endYear: number,
   source: "live" | "saved" = "live",
+  savedAt?: string,
 ): CaseFile {
   const recent: [number, number] = [endYear - 9, endYear];
   const variables: Partial<Record<VariableKey, VariableResult>> = {};
@@ -54,6 +56,7 @@ export function analyze(
     variables,
     drivers: findDrivers(variables),
     source,
+    savedAt,
     generatedAt: new Date().toISOString(),
   };
 }

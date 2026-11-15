@@ -181,7 +181,7 @@ function seasonalFact(key: VariableKey, raw: MonthlyRaw, season: Season, lat: nu
   const d = changeDecimals(key);
   const sig = t.significance === "significant" ? "statistically significant" : t.significance === "suggestive" ? "possible but not yet significant" : "not statistically significant";
   return {
-    fact: `${prefix}${info.label} in ${seasonLabel(season, lat)} averaged ${fmt(c.recentMean, info.decimals)} ${unit} in ${c.recentStart}–${c.recentEnd}, ${signed(c.change, d)} ${changeUnit(key) === "mm/yr" ? "mm" : changeUnit(key)} versus ${c.baselineStart}–${c.baselineEnd}; the ${BASELINE[0]}–${endYear} trend is ${signed(t.slopePerDecade, d)} ${changeUnit(key) === "mm/yr" ? "mm" : changeUnit(key)} per decade (${sig}, ${pText(t.pValue)}).`,
+    fact: `${prefix}${key === "PRECTOTCORR" ? `Rainfall in ${seasonLabel(season, lat)} totaled on average` : `${info.label} in ${seasonLabel(season, lat)} averaged`} ${fmt(c.recentMean, info.decimals)} ${unit} in ${c.recentStart}–${c.recentEnd}, ${signed(c.change, d)} ${changeUnit(key) === "mm/yr" ? "mm" : changeUnit(key)} versus ${c.baselineStart}–${c.baselineEnd}; the ${BASELINE[0]}–${endYear} trend is ${signed(t.slopePerDecade, d)} ${changeUnit(key) === "mm/yr" ? "mm" : changeUnit(key)} per decade (${sig}, ${pText(t.pValue)}).`,
     direction: t.significance === "none" ? 0 : Math.sign(t.slopePerYear),
   };
 }
@@ -205,7 +205,7 @@ function biggestMonthFact(cf: CaseFile, key: VariableKey, prefix = ""): string |
   return `${prefix}The month with the largest change in ${info.label.toLowerCase()} was ${MONTHS[best]}: ${signed(diff, changeDecimals(key))} ${unit} in ${cf.period.recent[0]}–${cf.period.recent[1]} compared with ${cf.period.baseline[0]}–${cf.period.baseline[1]}.`;
 }
 
-export async function investigate(input: { question: string; lat: number; lon: number; name: string }): Promise<Investigation> {
+export async function investigate(input: { question: string; lat: number; lon: number; name: string; preferSaved?: boolean }): Promise<Investigation> {
   const started = Date.now();
   const trace: TraceStep[] = [];
   const step = async <T,>(
@@ -251,7 +251,7 @@ Choose the season the question is about, or "year" if none. Set comparePlace onl
 
   // 2. Tool: NASA data for the place.
   const data = await step("Fetch NASA POWER data", "tool", `Monthly data since 1981 for ${place.name} (8 variables).`, async () => {
-    const d = await getPowerData(place.lat, place.lon);
+    const d = await getPowerData(place.lat, place.lon, input.preferSaved);
     return { value: d, input: { lat: place.lat, lon: place.lon }, output: { source: d.source, years: `1981–${d.endYear}` } };
   });
   const cf = analyze(data.raw, place, data.endYear, data.source);
@@ -310,7 +310,7 @@ Choose the season the question is about, or "year" if none. Set comparePlace onl
     if (other) {
       try {
         const od = await step("Fetch NASA POWER data", "tool", `Monthly data since 1981 for ${other.name}.`, async () => {
-          const d = await getPowerData(other.lat, other.lon);
+          const d = await getPowerData(other.lat, other.lon, input.preferSaved);
           return { value: d, input: { lat: other.lat, lon: other.lon }, output: { source: d.source } };
         });
         await step("Compare the two places", "tool", "Runs the same tests for the second place and flags opposite trends.", async () => {

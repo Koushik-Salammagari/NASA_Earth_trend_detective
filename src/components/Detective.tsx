@@ -88,7 +88,13 @@ export default function Detective({
       const res = await fetch("/api/investigate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, lat: place.lat, lon: place.lon, name: place.name }),
+        body: JSON.stringify({
+          question: text,
+          lat: place.lat,
+          lon: place.lon,
+          name: place.name,
+          saved: new URLSearchParams(window.location.search).get("saved") === "1",
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Something went wrong.");
