@@ -11,9 +11,11 @@
     "prebuild": "node scripts/save-demo.mjs"
   },
   "dependencies": {
+    "@types/pngjs": "^6.0.5",
     "geist": "^1.9.2",
     "lucide-react": "^1.73.0",
     "next": "15.5.29",
+    "pngjs": "^7.0.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "recharts": "^3.10.1"

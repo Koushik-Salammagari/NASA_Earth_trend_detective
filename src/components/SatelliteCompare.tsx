@@ -1,233 +1,324 @@
 "use client";
 
-// Before/after satellite view from NASA GIBS (Global Imagery Browse Services).
-// Images are monthly MODIS Terra composites requested straight from GIBS WMS.
-import { useEffect, useMemo, useState } from "react";
+// "Seen from space": the same area in two years, side by side, plus a change map
+// and a plain-English summary measured from NASA's own pixel values.
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Satellite } from "lucide-react";
+import {
+  AFTER_YEAR,
+  BEFORE_YEAR,
+  LAYERS,
+  MONTHS,
+  basemapUrl,
+  defaultMonth,
+  pictureUrl,
+  snapshot,
+  type LayerId,
+  type SatelliteCompareResult,
+} from "@/lib/satellite";
 
-type LayerId = "ndvi" | "lst";
-
-const LAYERS: Record<
-  LayerId,
-  { name: string; gibs: string; period: "month" | "8day"; legend: [string, string]; gradient: string; note: string }
-> = {
-  ndvi: {
-    name: "Vegetation",
-    gibs: "MODIS_Terra_L3_NDVI_Monthly",
-    period: "month",
-    legend: ["Bare or dry", "Green and dense"],
-    gradient: "linear-gradient(90deg,#a68a64,#d9cf8c,#9cc55a,#3e8e2f,#0f5a1c)",
-    note: "NDVI (monthly): how green the land is, from MODIS on NASA's Terra satellite",
-  },
-  lst: {
-    name: "Daytime land temperature",
-    gibs: "MODIS_Terra_L3_Land_Surface_Temp_8Day_Day",
-    period: "8day",
-    legend: ["Cooler surface", "Hotter surface"],
-    gradient: "linear-gradient(90deg,#fff6a8,#ffd23f,#ff9a1f,#f0521c,#a5150e)",
-    note: "Daytime land surface temperature (8-day average, 1 km), from MODIS on NASA's Terra satellite",
-  },
+const CHANGE_STOPS: Record<LayerId, string[]> = {
+  ndvi: ["#8c510a", "#d8b365", "#f5f5f5", "#5ab4ac", "#01665e"],
+  lst: ["#2166ac", "#92c5de", "#f7f7f7", "#f4a582", "#b2182b"],
 };
 
-const MONTHS = [
-  { m: "01", label: "January" },
-  { m: "04", label: "April" },
-  { m: "07", label: "July" },
-  { m: "10", label: "October" },
-];
-
-const BEFORE_YEAR = 2001;
-const AFTER_YEAR = 2025;
-// Monthly composites GIBS does not have, so we use the year before instead.
-const MISSING_MONTHS: Partial<Record<LayerId, string[]>> = { ndvi: ["2025-04"] };
-// 8-day composites start on day 1, 9, 17, ... of each year; pick the one nearest mid-month.
-const MID_MONTH_DOY: Record<string, number> = { "01": 9, "04": 105, "07": 193, "10": 289 };
-const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-interface Snapshot {
-  time: string; // GIBS TIME value
-  label: string; // what the person sees
+function hex(h: string) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function snapshot(layer: LayerId, year: number, month: string): Snapshot {
-  if (LAYERS[layer].period === "8day") {
-    const start = new Date(Date.UTC(year, 0, MID_MONTH_DOY[month]));
-    const end = new Date(start.getTime() + 7 * 86400000);
-    const label =
-      start.getUTCMonth() === end.getUTCMonth()
-        ? `${start.getUTCDate()}–${end.getUTCDate()} ${MONTH_SHORT[start.getUTCMonth()]} ${year}`
-        : `${start.getUTCDate()} ${MONTH_SHORT[start.getUTCMonth()]}–${end.getUTCDate()} ${MONTH_SHORT[end.getUTCMonth()]} ${year}`;
-    return { time: start.toISOString().slice(0, 10), label };
-  }
-  let y = year;
-  if (MISSING_MONTHS[layer]?.includes(`${y}-${month}`)) y -= 1;
-  const name = MONTHS.find((x) => x.m === month)?.label ?? month;
-  return { time: `${y}-${month}-01`, label: `${name} ${y}` };
+function mix(stops: string[], t: number) {
+  const x = ((Math.max(-1, Math.min(1, t)) + 1) / 2) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x));
+  const f = x - i;
+  const a = hex(stops[i]);
+  const b = hex(stops[i + 1]);
+  return a.map((v, k) => Math.round(v + (b[k] - v) * f));
 }
 
-function gibsUrl(layer: LayerId, time: string, lat: number, lon: number) {
-  const halfLat = 1.0;
-  const halfLon = Math.min(3, (halfLat * 4) / 3 / Math.max(0.35, Math.cos((lat * Math.PI) / 180)));
-  const s = Math.max(-90, lat - halfLat);
-  const n = Math.min(90, lat + halfLat);
-  const params = new URLSearchParams({
-    SERVICE: "WMS",
-    REQUEST: "GetMap",
-    VERSION: "1.3.0",
-    LAYERS: `BlueMarble_ShadedRelief_Bathymetry,${LAYERS[layer].gibs},Reference_Features_15m`,
-    STYLES: "",
-    CRS: "EPSG:4326",
-    BBOX: [s, lon - halfLon, n, lon + halfLon].map((v) => v.toFixed(4)).join(","),
-    WIDTH: "960",
-    HEIGHT: "720",
-    FORMAT: "image/jpeg",
-    TIME: time,
-  });
-  return `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?${params.toString()}`;
+function fmtValue(layer: LayerId, v: number) {
+  const info = LAYERS[layer];
+  return `${v.toFixed(info.decimals)}${info.unit ? ` ${info.unit}` : ""}`;
+}
+
+function compareWords(layer: LayerId, before: number, after: number) {
+  const info = LAYERS[layer];
+  const d = after - before;
+  if (Math.abs(d) <= info.sameBand) return { word: info.words.same, tone: "same" as const, amount: "" };
+  const amount = layer === "lst" ? `${Math.abs(d).toFixed(1)} °C ` : "";
+  return d > 0
+    ? { word: `${amount}${info.words.more}`, tone: "more" as const, amount }
+    : { word: `${amount}${info.words.less}`, tone: "less" as const, amount };
 }
 
 export default function SatelliteCompare({ place }: { place: { name: string; lat: number; lon: number } }) {
   const [layer, setLayer] = useState<LayerId>("ndvi");
-  const [month, setMonth] = useState(place.lat >= 0 ? "07" : "01");
-  const [pos, setPos] = useState(50);
-  const [loaded, setLoaded] = useState({ before: false, after: false });
-  const [failed, setFailed] = useState(false);
+  const [month, setMonth] = useState(defaultMonth(place.lat));
+  const [result, setResult] = useState<SatelliteCompareResult | null>(null);
+  const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
+  const [imgLoaded, setImgLoaded] = useState({ a: false, b: false });
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const info = LAYERS[layer];
   const before = snapshot(layer, BEFORE_YEAR, month);
   const after = snapshot(layer, AFTER_YEAR, month);
-  const beforeSrc = useMemo(() => gibsUrl(layer, before.time, place.lat, place.lon), [layer, before.time, place.lat, place.lon]);
-  const afterSrc = useMemo(() => gibsUrl(layer, after.time, place.lat, place.lon), [layer, after.time, place.lat, place.lon]);
+  const short = place.name.split(",")[0];
 
   useEffect(() => {
-    setLoaded({ before: false, after: false });
-    setFailed(false);
-  }, [beforeSrc, afterSrc]);
+    const ctrl = new AbortController();
+    setStatus("loading");
+    setResult(null);
+    setImgLoaded({ a: false, b: false });
+    fetch(`/api/satellite?layer=${layer}&lat=${place.lat}&lon=${place.lon}&month=${month}`, { signal: ctrl.signal })
+      .then(async (r) => {
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error);
+        setResult(j as SatelliteCompareResult);
+        setStatus("done");
+      })
+      .catch((e) => {
+        if (e?.name !== "AbortError") setStatus("error");
+      });
+    return () => ctrl.abort();
+  }, [layer, month, place.lat, place.lon]);
 
-  const ready = loaded.before && loaded.after;
-  const info = LAYERS[layer];
-  const short = place.name.split(",")[0];
+  // Draw the change map.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c || !result) return;
+    const { w, h, data } = result.grid;
+    const bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0));
+    const vals = new Int8Array(bytes.buffer);
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d")!;
+    const img = ctx.createImageData(w, h);
+    const stops = CHANGE_STOPS[result.layer];
+    for (let i = 0; i < w * h; i++) {
+      const v = vals[i];
+      if (v === -128) continue;
+      const t = v / 127;
+      const [r, g, b] = mix(stops, t);
+      img.data[i * 4] = r;
+      img.data[i * 4 + 1] = g;
+      img.data[i * 4 + 2] = b;
+      img.data[i * 4 + 3] = Math.round(255 * (0.55 + 0.45 * Math.min(1, Math.abs(t))));
+    }
+    ctx.putImageData(img, 0, 0);
+  }, [result]);
+
+  const near = result?.near;
+  const view = result?.view;
+  const share = result?.share;
+  const nearWords = near ? compareWords(layer, near.before, near.after) : null;
+  const radiusPctOfHeight = ((result?.radiusKm ?? 25) / 222.6) * 100;
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Satellite className="h-4.5 w-4.5 text-accent" aria-hidden="true" />
-            <h3 className="text-lg font-semibold tracking-tight">Seen from space</h3>
-          </div>
-          <p className="mt-1 max-w-xl text-sm text-slate-500">
-            Real NASA satellite images around {short}, {BEFORE_YEAR} against {AFTER_YEAR}. Drag the slider to compare.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs" role="group" aria-label="Satellite layer">
+      <div className="flex items-center gap-2">
+        <Satellite className="h-4.5 w-4.5 text-accent" aria-hidden="true" />
+        <h3 className="text-lg font-semibold tracking-tight">Seen from space</h3>
+      </div>
+      <p className="mt-1 max-w-2xl text-sm text-slate-500">
+        The same area around {short} (about 220 km across), photographed by NASA&rsquo;s Terra satellite in{" "}
+        {BEFORE_YEAR} and {AFTER_YEAR}. Pick what to look at and the time of year.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500">Look at</span>
+          <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs" role="group" aria-label="What to look at">
             {(Object.keys(LAYERS) as LayerId[]).map((id) => (
               <button
                 key={id}
                 onClick={() => setLayer(id)}
                 aria-pressed={layer === id}
-                className={`rounded-md px-2.5 py-1.5 ${layer === id ? "bg-white font-medium shadow-sm" : "text-slate-600"}`}
+                className={`rounded-md px-3 py-1.5 ${layer === id ? "bg-white font-medium shadow-sm" : "text-slate-600"}`}
               >
                 {LAYERS[id].name}
               </button>
             ))}
           </div>
-          <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs" role="group" aria-label="Month">
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500">Time of year</span>
+          <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs" role="group" aria-label="Time of year">
             {MONTHS.map((x) => (
               <button
                 key={x.m}
                 onClick={() => setMonth(x.m)}
                 aria-pressed={month === x.m}
-                className={`rounded-md px-2.5 py-1.5 ${month === x.m ? "bg-white font-medium shadow-sm" : "text-slate-600"}`}
+                className={`rounded-md px-3 py-1.5 ${month === x.m ? "bg-white font-medium shadow-sm" : "text-slate-600"}`}
               >
-                {x.label.slice(0, 3)}
+                {x.short}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      <div
-        className="relative mt-5 aspect-[4/3] w-full select-none overflow-hidden rounded-xl bg-slate-900 sm:aspect-[16/10]"
-        style={{ touchAction: "pan-y" }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={beforeSrc}
-          alt={`${info.name} around ${short}, ${before.label}`}
-          className="absolute inset-0 h-full w-full object-cover"
-          onLoad={() => setLoaded((l) => ({ ...l, before: true }))}
-          onError={() => setFailed(true)}
-          draggable={false}
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={afterSrc}
-          alt={`${info.name} around ${short}, ${after.label}`}
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ clipPath: `inset(0 0 0 ${pos}%)` }}
-          onLoad={() => setLoaded((l) => ({ ...l, after: true }))}
-          onError={() => setFailed(true)}
-          draggable={false}
-        />
-
-        {/* place marker */}
-        <span
-          className="pointer-events-none absolute left-1/2 top-1/2 z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white ring-4 ring-accent/70 shadow-[0_0_0_7px_rgba(0,0,0,0.35)]"
-          aria-hidden="true"
-        />
-
-        {/* divider */}
-        <div className="pointer-events-none absolute inset-y-0" style={{ left: `${pos}%` }} aria-hidden="true">
-          <div className="absolute inset-y-0 -left-px w-0.5 bg-white shadow-[0_0_8px_rgba(0,0,0,0.5)]" />
-          <div className="absolute bottom-6 left-1/2 grid h-9 w-9 -translate-x-1/2 place-items-center rounded-full bg-white text-xs font-semibold text-slate-700 shadow-lg">
-            ⇆
-          </div>
-        </div>
-
-        <span className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
-          {before.label}
-        </span>
-        <span className="pointer-events-none absolute right-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
-          {after.label}
-        </span>
-
-        {!ready && !failed && (
-          <div className="absolute inset-0 grid place-items-center bg-slate-900/60 text-sm text-white/80">
-            <span className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading NASA satellite images…
-            </span>
+      {/* The answer, in words */}
+      <div className="mt-5 rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+        {status === "loading" && (
+          <p className="flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Measuring the change from NASA&rsquo;s
+            satellite data…
+          </p>
+        )}
+        {status === "error" && (
+          <p className="text-sm text-slate-600">
+            NASA&rsquo;s satellite service didn&rsquo;t respond. The pictures below may still load; try again in a
+            minute.
+          </p>
+        )}
+        {status === "done" && result && (
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div>
+              {near && nearWords ? (
+                <p className="text-[15px] font-medium leading-snug">
+                  Within {result.radiusKm} km of {short}, {result.after.label} was{" "}
+                  <span
+                    className={
+                      nearWords.tone === "same"
+                        ? ""
+                        : layer === "ndvi"
+                          ? nearWords.tone === "more"
+                            ? "text-teal-700"
+                            : "text-amber-800"
+                          : nearWords.tone === "more"
+                            ? "text-red-700"
+                            : "text-blue-700"
+                    }
+                  >
+                    {nearWords.word}
+                  </span>{" "}
+                  {nearWords.tone === "same" ? "as" : "than"} {result.before.label}.
+                </p>
+              ) : (
+                <p className="text-[15px] font-medium leading-snug">
+                  Not enough clear land near {short} in these snapshots (water, cloud or missing data). Try another
+                  time of year.
+                </p>
+              )}
+              {share && (
+                <p className="mt-1.5 text-sm text-slate-600">
+                  Across the whole area: {Math.round(share.more)}% of the land got {info.words.more},{" "}
+                  {Math.round(share.less)}% got {info.words.less}, and {Math.round(share.same)}% stayed about the same.
+                </p>
+              )}
+            </div>
+            {near && (
+              <div className="flex items-center gap-3 tabular">
+                <div className="text-right">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">{result.before.year}</p>
+                  <p className="text-xl font-semibold">{fmtValue(layer, near.before)}</p>
+                </div>
+                <span className="text-slate-400" aria-hidden="true">
+                  →
+                </span>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">{result.after.year}</p>
+                  <p className="text-xl font-semibold">{fmtValue(layer, near.after)}</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
-        {failed && (
-          <div className="absolute inset-0 grid place-items-center bg-slate-900/80 p-6 text-center text-sm text-white/80">
-            NASA&rsquo;s image service didn&rsquo;t respond. Try another month or come back in a minute.
-          </div>
+        {status === "done" && near && (
+          <p className="mt-2 text-xs text-slate-500">
+            {info.words.quantity}, averaged over the land within {result!.radiusKm} km.
+          </p>
         )}
-
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={pos}
-          onChange={(e) => setPos(Number(e.target.value))}
-          aria-label={`Compare ${before.label} with ${after.label}`}
-          className="absolute inset-0 h-full w-full cursor-ew-resize opacity-0"
-        />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-        <div className="flex items-center gap-2">
-          <span>{info.legend[0]}</span>
+      {/* Before and after pictures */}
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        {[
+          { key: "a" as const, snap: before },
+          { key: "b" as const, snap: after },
+        ].map(({ key, snap }) => (
+          <figure key={key + snap.time + layer}>
+            <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={pictureUrl(layer, snap.time, place.lat, place.lon)}
+                alt={`${info.name} around ${short}, ${snap.label}`}
+                className="absolute inset-0 h-full w-full"
+                onLoad={() => setImgLoaded((s) => ({ ...s, [key]: true }))}
+              />
+              <span
+                className="pointer-events-none absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_3px_rgba(37,82,216,0.8),0_0_0_7px_rgba(0,0,0,0.3)]"
+                aria-hidden="true"
+              />
+              <span className="absolute left-3 top-3 rounded-md bg-black/65 px-2.5 py-1 text-sm font-semibold text-white">
+                {snap.label}
+              </span>
+              {!imgLoaded[key] && (
+                <div className="absolute inset-0 grid place-items-center text-sm text-white/70">
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                </div>
+              )}
+            </div>
+          </figure>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span className="flex items-center gap-2">
+          {info.legend[0]}
           <span className="h-2 w-28 rounded-full" style={{ background: info.gradient }} aria-hidden="true" />
-          <span>{info.legend[1]}</span>
-        </div>
-        <span>{info.note}. Imagery: NASA GIBS. The view is about 220 km from top to bottom; the dot marks the place.</span>
+          {info.legend[1]}
+        </span>
+        <span>The dot marks {short}. Blue is sea.</span>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500">
-        A single snapshot can be unusual (a dry month, a heatwave), so treat this as a picture, not a trend. The statistics above are the
-        evidence.
-      </p>
+
+      {/* Change map */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-[3fr_2fr] lg:items-center">
+        <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-900">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={basemapUrl(place.lat, place.lon)}
+            alt=""
+            className="absolute inset-0 h-full w-full opacity-70 grayscale"
+          />
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 h-full w-full"
+            aria-label={`Map of where ${info.name.toLowerCase()} changed between ${before.label} and ${after.label}`}
+          />
+          <span
+            className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed border-white/90"
+            style={{ height: `${radiusPctOfHeight * 2}%`, aspectRatio: "1 / 1" }}
+            aria-hidden="true"
+          />
+          <span className="absolute left-3 top-3 rounded-md bg-black/65 px-2.5 py-1 text-sm font-semibold text-white">
+            What changed
+          </span>
+          {status === "loading" && (
+            <div className="absolute inset-0 grid place-items-center text-sm text-white/70">
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            </div>
+          )}
+        </div>
+        <div className="text-sm leading-relaxed text-slate-600">
+          <p className="font-medium text-ink">How to read the change map</p>
+          <p className="mt-1.5">
+            Each colored dot is about 1 km of land. It compares {after.label} with {before.label} at that exact spot.
+          </p>
+          <div className="mt-3 flex items-center gap-2 text-xs">
+            {info.changeLegend[0]}
+            <span className="h-2 w-32 rounded-full" style={{ background: info.changeGradient }} aria-hidden="true" />
+            {info.changeLegend[1]}
+          </div>
+          <p className="mt-3">
+            Pale means little change. The dashed circle is the {result?.radiusKm ?? 25} km area used for the summary
+            above.
+          </p>
+          <p className="mt-3 text-xs text-slate-500">
+            A single snapshot can be unusual (a dry month, a heatwave, a wet spring), so treat this as a picture, not
+            a trend. The 45-year statistics above are the evidence. {info.note}; imagery and values from NASA GIBS.
+          </p>
+        </div>
+      </div>
     </section>
   );
 }
