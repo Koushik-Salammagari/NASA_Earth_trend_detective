@@ -19,6 +19,8 @@ import { changeDecimals, changeUnit, fmt, pText, significanceLabel, signed } fro
 import { explainPayload, headlines } from "@/lib/findings";
 import { FAMILY_COLOR, SeasonChart, Sparkline, TrendChart } from "@/components/charts";
 import Detective, { VerifiedBadge } from "@/components/Detective";
+import ClimateStripes from "@/components/ClimateStripes";
+import SatelliteCompare from "@/components/SatelliteCompare";
 
 interface Place {
   name: string;
@@ -270,6 +272,8 @@ export default function Home() {
               )}
             </section>
 
+            <ClimateStripes key={`stripes-${data.place.name}`} data={data} />
+
             <Detective
               key={data.place.name}
               place={data.place}
@@ -330,6 +334,8 @@ export default function Home() {
                 </div>
               </section>
             )}
+
+            <SatelliteCompare key={`sat-${data.place.name}`} place={data.place} />
 
             {/* Drivers + AI */}
             <section className="grid gap-4 lg:grid-cols-5">
