@@ -11,10 +11,13 @@ Built for the 2026 NASA Space Apps Challenge: **Be an Earth System Trend Detecti
 3. **Test:** turns monthly values into yearly values (removing the seasonal cycle), then runs a Mann-Kendall trend test with Sen's slope. p < 0.05 is reported as significant, p < 0.10 as a possible trend.
 4. **Connect:** matches variables that changed together to known physical links (for example, drier soil and hotter days), and reports the detrended year-to-year correlation as supporting evidence. These are hypotheses, not proof of cause.
 5. **Explain:** Google Gemini writes a short plain-English summary from the computed numbers only.
+6. **Climate stripes:** one colored stripe per year since 1981 (temperature or rainfall) against the 1981–2010 average, downloadable as a share image.
+7. **Seen from space:** NASA satellite images of the surrounding ~220 km area from 2001 and 2025, side by side (MODIS Terra vegetation greenness and daytime land surface temperature). The server converts each pixel color back to NASA's value using the GIBS colormap, then reports the average change within 25 km and maps where land got greener, browner, hotter or cooler. A single snapshot is not a trend, and the app says so.
 
 ## NASA data
 
 - **NASA POWER** (Prediction Of Worldwide Energy Resources), NASA Langley Research Center, Monthly API. Meteorological values are derived from NASA GMAO's MERRA-2 reanalysis. Parameters: `T2M`, `T2M_MAX`, `T2M_MIN`, `PRECTOTCORR`, `RH2M`, `GWETROOT`, `ALLSKY_SFC_SW_DWN`, `WS2M`.
+- **NASA GIBS** (Global Imagery Browse Services), WMS and colormaps: `MODIS_Terra_L3_NDVI_Monthly`, `MODIS_Terra_L3_Land_Surface_Temp_8Day_Day`, plus `BlueMarble_ShadedRelief_Bathymetry` and `Reference_Features_15m` for context. https://nasa-gibs.github.io/gibs-api-docs/
 
 ## Other resources
 
